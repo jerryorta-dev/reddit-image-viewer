@@ -30,6 +30,7 @@ const {
 const LOADING_ERROR_URL = "https://jhusain.github.io/reddit-image-viewer/error.png";
 
 
+
 // function which returns an array of image URLs for a given reddit sub
 // getSubImages("pics") ->
 // [
@@ -49,14 +50,11 @@ function getSubImages(sub) {
         // for each subscription. This ensures functions like retry will
         // issue additional requests.
         return defer(() =>
-            Observable.fromPromise(
+            from(
                 fetch(url).then(res => res.json()).then(data => {
                     const images =
                         data.data.children.
-                            map(image => image.data.url).
-                            filter(url => {
-                                return url.indexOf('.jpg') !== -1;
-                        });
+                            map(image => image.data.url);
                     localStorage.setItem(sub, JSON.stringify(images));
                     return images;
                 })));
@@ -96,8 +94,10 @@ const indices =
         // value, startWith will add initial value to stream
         // startWith(0),
         startWith(0),
+
+        // wrap around here
         scan((acc, curr) => acc + curr, 0)
-    )
+    );
 
 const images =
     subs.pipe(
@@ -105,18 +105,67 @@ const images =
             getSubImages(sub).pipe(
                 switchMap(images =>
                     indices.pipe(
+                        filter(index => index >= 0 && index < images.length),
                         map(index => images[index])
                     )
                 ),
+                switchMap(url => preloadImage(url))
             )
         ),
     );
 
-images.subscribe(images => console.log(images));
+function preloadImage(src) {
+    // using create
+    // return Observable.create((observer) => {
+    //     const img = new Image();
+    //
+    //     img.onload = () => {
+    //       observer.next(src);
+    //       observer.complete();
+    //     };
+    //
+    //     img.onerror = () => {
+    //         observer.next(LOADING_ERROR_URL);
+    //         observer.complete();
+    //     };
+    //
+    //     img.src = src;
+    //
+    //     // unsubscribe
+    //     return () => {
+    //         delete img.onerror;
+    //         delete img.onload;
+    //     }
+    // });
+
+    // using fromEvent
+    return defer(() => {
+        const img = new Image();
+        const success = fromEvent(img, 'load')
+            .pipe(
+                map(() => src)
+            );
+        const failure = fromEvent(img, 'error')
+            .pipe(
+                map(() => LOADING_ERROR_URL)
+            );
+
+        img.src = src;
+
+        return merge(success, failure);
+    });
+}
+
+
+// This "actions" Observable is a placeholder. Replace it with an
+// observable that notfies whenever a user performs an action,
+// like changing the sub or navigating the images
+const actions = merge(subs, nexts, backs);
+
+actions.subscribe(() => loading.style.visibility = "visible");
 
 images.subscribe({
     next(url) {
-        console.log(url);
         // hide the loading image
         loading.style.visibility = "hidden";
 
@@ -126,11 +175,5 @@ images.subscribe({
     error(e) {
         alert("I'm having trouble loading the images for that sub. Please wait a while, reload, and then try again later.")
     }
-})
+});
 
-// This "actions" Observable is a placeholder. Replace it with an
-// observable that notfies whenever a user performs an action,
-// like changing the sub or navigating the images
-const actions = merge(subs, nexts, backs);
-
-actions.subscribe(() => loading.style.visibility = "visible");
